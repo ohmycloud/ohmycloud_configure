@@ -1,0 +1,185 @@
+---
+title: Perl 6 圣诞月历-(2014)
+date: 2014-12-19
+tags: 圣诞
+categories: Perl 6
+comments: true
+---
+
+# 2014
+---
+
+## Data munging in Perl 6 vs Perl 5
+---
+
+案例学习: 生成成绩报告单
+
+```perl6
+example.txt
+STDOUT
+Peter	B
+Celine	A-
+Zsófia	B+
+João	F
+Maryam	B+
+秀英	B-
+Finn	D+
+Aarav	A
+Emma	F
+Omar	B
+```
+
+输出报告单：
+
+
+```perl6
+Zsófia's grade: B+
+List of students with a failing grade:
+  João, Emma
+Distribution of grades by letter:
+  A: 2 students
+  B: 5 students
+  D: 1 student
+  F: 2 students
+```
+
+example.txt 是一个文本文件， 每行一个学生姓名和分数，中间用空格分割。
+我们希望我们的脚本能解析这样的文件并打印含有如下信息的报告：
+
+学生名为 “Zsófia”的成绩
+所有不及格学生的名字 (i.e. worse than D-),
+根据字母( 不带 +/- ) 把成绩分组。得到学生成绩的分布。
+让我们一步步来：
+
+Part 1: 样板
+
+Perl 5
+
+
+```perl6
+#!/usr/bin/env perluse warnings;
+use strict;use feature 'say';
+use utf8;
+binmode STDOUT, ':utf8';
+```
+
+Perl 6
+
+
+```perl6
+#!/usr/bin/env perl6
+```
+
+在 Perl 6 中所有这些都为我们做好了。
+
+Part 2: 读取并解析输入
+
+Perl 5
+
+
+```perl6
+open my $fh, '<:utf8', "grades.txt"
+    or die "Failed to open file: $!";
+my %grade;
+while (<$fh>) {
+    m/^(\w+) \s+ ([A-F][+-]?)$/x
+        or die "Can't parse line '$_'";
+   $grade{$1} = $2;
+};
+```
+
+
+Perl 6
+
+
+```perl6
+my %grade = "grades.txt".IO.lines.map: {
+   m:s/^(\w+) (<[A..F]><[+-]>?)$/
+        or die "Can't parse line '$_'";
+    ~$0 => ~$1
+};
+```
+
+在 Perl 6 中， 对文件名字符串调用 .IO 方法会返回一个代表文件系统路径的对象， 我们可以继续在这个对象上调用  .lines 方法，得到文件的所有行的一个惰性列表。 “Lazy” 意味着它只会从磁盘中按需读取新行，当我们使用 .map 方法遍历列表元素的时候， 这样能使用单个赋值操作就能优雅地初始化一个散列。
+我们不需要让文件句柄识别 Unicode ，也不用管文件句柄是否正确关闭， 这在 Perl 6 中都是默认发生的。
+ .method: ... 语法也可以写为  .method(...),  前者使 map 看起来更像一个 block 语句，并减少了括号凌乱。
+ :s (“sigspace”) 正则修饰符使解析 tokens 间的空白更优雅。 但 Perl 6 中的字符类比 Perl 5 复杂了一丢丢。
+正则捕获结果变量($0, $1, …) 返回一个完整的  Match 对象 - 它为复杂使用场景增加了很多灵活性， 但是这里我们只想保留字符串， 所以使用 ~ 前置操作符字符串化了匹配对象。
+
+Part 3: 查看数据的特定项
+
+Perl 5
+
+
+```perl6
+say "Zsófia's grade: $grade{Zsófia}";
+```
+
+Perl 6
+
+
+```perl6
+say "Zsófia's grade: %grade<Zsófia>";
+```
+
+Perl 6 总是把散列中的 `{ }`  中的东西解析为表达式， 使用 `< >` 表示字面值。
+
+Part 4: 过滤数据
+
+Perl 5
+
+
+```perl6
+say "List of students with a failing grade:";
+say "  " . join ", ",  grep { $grade{$_} ge "E" } keys %grade;
+```
+
+
+Perl 6
+
+
+```perl6
+say "List of students with a failing grade:";
+say "  " ~ %grade.grep(*.value ge "E")».key.join(", ");
+```
+
+Perl 6 中允许我们按执行顺序把一些列方法写为链式操作。有一个重要区别：Perl 6 能让我们直接遍历散列的项， 散列中每一项都是一个 Pair 对象（Pair 对象能使用 .key 和.value 方法)。
+
+The `*`   Whatever star 用于定义一个简单的回调，而不用写一个花括号块。
+The `».` hyper operator 用于对 .grep 返回的 Pairs  的每个 Pair 上调用 一次 .key  方法，得出姓名列表
+
+Part 5: 从数据中创建频率分布
+
+Perl 5
+
+
+```perl6
+say "Distribution of grades by letter:";
+my %freq;
+$freq{substr $grade{$_}, 0, 1}++ for keys %grade;
+say "  $_: $freq{$_} student".($freq{$_} != 1 ? "s" : "")    for sort keys %freq;
+```
+
+Perl 6
+
+```perl6
+say "Distribution of grades by letter:";
+say "  {.key}: {+.value} student{"s" if .value != 1}"
+    for %grade.classify(*.value.comb[0]).sort(*.key);
+```
+
+计数和分组实在太常见了， Perl 6 提供了 `.classify`  方法。
+classify 方法里需要指定要分组的项（这里是 代表 `%grade` 条目的 Pair 对象 ）， 这些项应该根据什么规则进行分组（这里是根据第一个字母的值， 它代表分数（没有 +/-））。
+这生成一个匿名的散列，散列的值是匿名数组。
+
+
+```perl6
+%("B" => ["Peter" => "B", "Zsófia" => "B+", "Maryam" => "B+",
+ "秀英" => "B-", "Omar" => "B"],  "A" => ["Celine" => "A-", "Aarav" => "A"],  "F" => ["João" => "F", "Emma" => "F"],  "D" => ["Finn" => "D+"])
+```
+
+因为我们只对每组元素的个数感兴趣， 我们使用 + 前置操作符数字化每个值然后打印它， 在数组前面添加 + 符号会得到数组元素的个数。
+在 term 位置上一个 单独的 .method  方法等价于 `$_.method`,  意思是对当前循环变量调用该方法。
+任意代码的返回值能使用花括号 {} 插值到字符串中。
+if 语句能被用作表达式 - 当条件为 false 时，返回空列表，然后被字符串化为空字符串。
+对字符串调用不带参数的 `.comb`  会生成该字符串的一个字符列表。
